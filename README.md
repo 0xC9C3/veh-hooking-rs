@@ -1,5 +1,5 @@
 # veh-hooking-rs
-![Crates.io Version](https://img.shields.io/crates/v/veh-hooking-rs)
+[![Crates.io Version](https://img.shields.io/crates/v/veh-hooking-rs)](https://crates.io/crates/veh-hooking-rs/)
 ![CI workflow](https://github.com/0xC9C3/veh-hooking-rs/actions/workflows/ci.yml/badge.svg?branch=main)
 
 A library for creating hooks using VEH (Vectored Exception Handling) on Windows.
