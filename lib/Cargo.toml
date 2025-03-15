@@ -18,4 +18,4 @@ version = "0.60.0"
 features = ["Win32", "Win32_System", "Win32_System_Memory", "Win32_System_Diagnostics", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"]
 
 [dev-dependencies]
-serial_test = "*"
+serial_test = "3.2.0"
