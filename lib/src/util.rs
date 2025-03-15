@@ -79,6 +79,7 @@ pub fn os_bitness() -> u32 {
     }
 }
 
+static NO_MORE_FILES: u32 = 0x80070012;
 pub fn iterate_threads(
     callback: Box<dyn Fn(windows::Win32::Foundation::HANDLE) -> Result<(), std::io::Error>>,
 ) -> Result<(), std::io::Error> {
@@ -117,7 +118,7 @@ pub fn iterate_threads(
         te.dwSize = size_of::<THREADENTRY32>() as u32;
         let thread32_next = unsafe { Thread32Next(h, &mut te) };
         if thread32_next.is_err() {
-            if thread32_next.err().unwrap().code().0 as u32 == 0x80070012 {
+            if thread32_next.err().unwrap().code().0 as u32 == NO_MORE_FILES {
                 return Ok(());
             }
             return Err(std::io::Error::last_os_error());
