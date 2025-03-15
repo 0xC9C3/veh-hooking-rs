@@ -1,0 +1,15 @@
+[package]
+name = "veh-hooking-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+papaya = "0.2.1"
+iced-x86 = "1.21.0"
+
+[dependencies.windows]
+version = "0.60.0"
+features = ["Win32", "Win32_System", "Win32_System_Memory", "Win32_System_Diagnostics", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"]
+
+[dev-dependencies]
+serial_test = "*"
