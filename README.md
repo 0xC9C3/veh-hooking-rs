@@ -32,7 +32,7 @@ use veh_hooking_rs::manager::VEHManager;
 
 fn main() {
     let vm = VEHManager::new().expect("Failed to initialize VMM");
-    let result = vm.add_hardware_hook(
+    let result = vm.add_hardware_breakpoint_hook(
         std::thread::sleep as *const () as usize,
         |_exception_info| {
             println!("Hooked!");
@@ -57,6 +57,7 @@ Hook the `std::thread::sleep` function using a hardware breakpoint:
 
 ```rust
 use veh_hooking_rs::hardware_breakpoint::HardwareBreakpointHook;
+use veh_hooking_rs::hook_base::HookBase;
 
 fn main() {
     // ... create a vectored exception handler beforehand
@@ -67,6 +68,47 @@ fn main() {
             None
         },
         HWBreakpointSlot::Slot1,
+    );
+
+    println!("Create result! {:#?}", result);
+
+    println!("Begin loop");
+    loop {
+        println!("Outer tick");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+```
+
+### HookHandler
+
+HookHandler is a closure that takes a `*mut EXCEPTION_POINTERS` as an argument and returns an `Option<i32>`.
+If `None` is returned, the hook will continue execution. If `Some` is returned, the hook will return the value.
+This is useful for manually handling the NTSTATUS code returned by the Vectored Exception Handler in case you i.e. want
+to pass the exception to the next handler.
+
+### Callback whenever the VEH is triggered
+
+For even more control, you can use the `VEHManager::add_callback` method to add callbacks that will be called whenever
+the VEH is triggered.
+
+```rust
+use veh_hooking_rs::manager::VEHManager;
+
+fn main() {
+    let vm = VEHManager::new().expect("Failed to initialize VMM");
+    vm.add_callback(1, |_p| {
+        println!("Callback triggered!");
+
+        None
+    });
+    let result = vm.add_hardware_breakpoint_hook(
+        std::thread::sleep as *const () as usize,
+        |_exception_info| {
+            println!("Hooked!");
+
+            None
+        },
     );
 
     println!("Create result! {:#?}", result);
