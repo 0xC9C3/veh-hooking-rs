@@ -1,7 +1,9 @@
+use crate::hook_base::{veh_continue_hwbp, HookBase, HookError};
 use crate::manager::HookHandler;
 use crate::util::{iterate_threads, os_bitness};
 use papaya::HashMap;
 use std::sync::LazyLock;
+use windows::Win32::Foundation::{NTSTATUS, STATUS_SINGLE_STEP};
 use windows::Win32::System::Diagnostics::Debug::{
     GetThreadContext, SetThreadContext, CONTEXT_DEBUG_REGISTERS_AMD64,
     CONTEXT_DEBUG_REGISTERS_X86, EXCEPTION_POINTERS,
@@ -10,7 +12,7 @@ use windows::Win32::System::Diagnostics::Debug::{
 pub(crate) static HW_BP_HOOK_HASHMAP: LazyLock<HashMap<usize, HardwareBreakpointHook>> =
     LazyLock::new(|| HashMap::new());
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum HWBreakpointSlot {
     Slot0 = 0,
     Slot1 = 1,
@@ -32,6 +34,20 @@ struct AlignedContext {
     ctx: windows::Win32::System::Diagnostics::Debug::CONTEXT,
 }
 
+impl AlignedContext {
+    fn with_context_flags() -> Self {
+        let mut context = Self::default();
+        let reg = if os_bitness() == 64 {
+            CONTEXT_DEBUG_REGISTERS_AMD64
+        } else {
+            CONTEXT_DEBUG_REGISTERS_X86
+        };
+        context.ctx.ContextFlags = reg;
+
+        context
+    }
+}
+
 impl HardwareBreakpointHook {
     fn create(
         target: usize,
@@ -51,25 +67,12 @@ impl HardwareBreakpointHook {
         iterate_threads(Box::new(move |thd| Self::set_breakpoint(thd, target, slot)))
     }
 
-    fn get_context() -> AlignedContext {
-        let mut context = AlignedContext::default();
-
-        let reg = if os_bitness() == 64 {
-            CONTEXT_DEBUG_REGISTERS_AMD64
-        } else {
-            CONTEXT_DEBUG_REGISTERS_X86
-        };
-        context.ctx.ContextFlags = reg;
-
-        context
-    }
-
     pub fn set_breakpoint(
         handle: windows::Win32::Foundation::HANDLE,
         target: usize,
         pos: HWBreakpointSlot,
     ) -> Result<(), std::io::Error> {
-        let mut context = Self::get_context();
+        let mut context = AlignedContext::with_context_flags();
         let result = unsafe { GetThreadContext(handle, &mut context.ctx) };
 
         if result.is_err() {
@@ -103,7 +106,7 @@ impl HardwareBreakpointHook {
         target: usize,
         pos: HWBreakpointSlot,
     ) -> Result<(), std::io::Error> {
-        let mut context = Self::get_context();
+        let mut context = AlignedContext::with_context_flags();
         let result = unsafe { GetThreadContext(handle, &mut context.ctx) };
 
         if result.is_err() {
@@ -157,11 +160,11 @@ impl HardwareBreakpointHook {
         }))
     }
 
-    pub fn add_hook(
+    pub fn add_hook_at_slot(
         target_address: usize,
         handler: HookHandler,
         breakpoint_slot: HWBreakpointSlot,
-    ) -> Result<(), std::io::Error> {
+    ) -> Result<(), HookError> {
         let sw_bp_hook = HardwareBreakpointHook::create(target_address, handler, breakpoint_slot)?;
 
         let pin = HW_BP_HOOK_HASHMAP.pin();
@@ -173,7 +176,7 @@ impl HardwareBreakpointHook {
         Ok(())
     }
 
-    pub fn remove_hook(target_address: usize) -> Result<(), std::io::Error> {
+    pub fn remove_hook(target_address: usize) -> Result<(), HookError> {
         let pin = HW_BP_HOOK_HASHMAP.pin();
         let hook = pin
             .get(&target_address)
@@ -185,7 +188,7 @@ impl HardwareBreakpointHook {
         Ok(())
     }
 
-    pub fn remove_all_hooks() -> Result<(), std::io::Error> {
+    pub fn remove_all_hooks() -> Result<(), HookError> {
         for (k, _v) in HW_BP_HOOK_HASHMAP.pin().iter() {
             Self::remove_hook(*k)?;
         }
@@ -193,8 +196,92 @@ impl HardwareBreakpointHook {
         Ok(())
     }
 
-    pub fn handle(&self, p: *mut EXCEPTION_POINTERS) {
+    pub fn handle(&self, p: *mut EXCEPTION_POINTERS) -> Option<i32> {
         (self.handler)(p)
+    }
+}
+
+impl HookBase for HardwareBreakpointHook {
+    fn enable(&self) -> Result<(), HookError> {
+        let target = self.target;
+        let slot = self.slot;
+        iterate_threads(Box::new(move |thd| Self::set_breakpoint(thd, target, slot)))
+            .map_err(|e| HookError::from(e))
+    }
+    fn disable(&self) -> Result<(), HookError> {
+        let target = self.target;
+        let slot = self.slot;
+        iterate_threads(Box::new(move |thd| {
+            Self::remove_breakpoint(thd, target, slot)
+        }))
+        .map_err(|e| HookError::from(e))
+    }
+
+    fn handle(&self, p: *mut EXCEPTION_POINTERS) -> Option<i32> {
+        (self.handler)(p)
+    }
+
+    fn add_hook(target_address: usize, handler: HookHandler) -> Result<(), HookError> {
+        let mut slots = vec![
+            HWBreakpointSlot::Slot0,
+            HWBreakpointSlot::Slot1,
+            HWBreakpointSlot::Slot2,
+            HWBreakpointSlot::Slot3,
+        ];
+
+        HW_BP_HOOK_HASHMAP.pin().iter().for_each(|(_, v)| {
+            if let Some(pos) = slots.iter().position(|&x| x == v.slot) {
+                slots.remove(pos);
+            }
+        });
+
+        if slots.is_empty() {
+            return Err(HookError::from(std::io::Error::last_os_error()));
+        }
+
+        let slot = slots[0];
+
+        Self::add_hook_at_slot(target_address, handler, slot)
+    }
+
+    fn remove_hook(target_address: usize) -> Result<(), HookError> {
+        let pin = HW_BP_HOOK_HASHMAP.pin();
+        let hook = pin
+            .get(&target_address)
+            .ok_or(std::io::Error::last_os_error())?;
+
+        hook.disable()?;
+        pin.remove(&target_address);
+
+        Ok(())
+    }
+
+    fn remove_all_hooks() -> Result<(), HookError> {
+        for (k, _v) in HW_BP_HOOK_HASHMAP.pin().iter() {
+            Self::remove_hook(*k)?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_event(
+        rip: usize,
+        status: NTSTATUS,
+        exception_info: *mut EXCEPTION_POINTERS,
+    ) -> Option<i32> {
+        match status {
+            STATUS_SINGLE_STEP => {
+                if let Some(hook) = HW_BP_HOOK_HASHMAP.pin().get(&rip) {
+                    return Some(
+                        hook.handle(exception_info)
+                            .unwrap_or(veh_continue_hwbp(exception_info)),
+                    );
+                }
+
+                None
+            }
+            _ => None,
+        }
     }
 }
 
@@ -206,8 +293,9 @@ impl Drop for HardwareBreakpointHook {
 
 #[cfg(test)]
 mod hardware_breakpoint_tests {
-    use crate::hardware::{HWBreakpointSlot, HardwareBreakpointHook};
-    use crate::manager::VEHManager;
+    use crate::base_tests::BaseTest;
+    use crate::hardware::HardwareBreakpointHook;
+    use crate::hook_base::HookBase;
     use serial_test::serial;
     use std::ptr::null;
     use windows::core::imp::GetProcAddress;
@@ -215,141 +303,98 @@ mod hardware_breakpoint_tests {
 
     static HW_BP_TEST_VALUE: std::sync::Mutex<i32> = std::sync::Mutex::new(0);
 
-    fn get_vm() -> VEHManager {
-        VEHManager::new().unwrap()
-    }
+    struct HWBPHookTests;
 
-    fn reset_test_value() {
-        *HW_BP_TEST_VALUE.lock().unwrap() = 0;
-    }
+    impl HWBPHookTests {
+        fn add_multiple_hooks() {
+            Self::reset_test_value();
 
-    fn add_get_proc_address_hook() {
-        let result = HardwareBreakpointHook::add_hook(
-            GetProcAddress as *const () as usize,
-            |_exception_info| {
-                *HW_BP_TEST_VALUE.lock().unwrap() += 1;
-            },
-            HWBreakpointSlot::Slot1,
-        );
+            let _vm = Self::get_vm();
+            let current = *HW_BP_TEST_VALUE.lock().unwrap();
 
-        assert_eq!(result.is_ok(), true);
-    }
+            let result = HardwareBreakpointHook::add_hook(
+                GetProcAddress as *const () as usize,
+                |_exception_info| {
+                    *HW_BP_TEST_VALUE.lock().unwrap() += 1;
 
-    fn remove_get_proc_address_hook() {
-        let result = HardwareBreakpointHook::remove_hook(GetProcAddress as *const () as usize);
-        assert_eq!(result.is_ok(), true);
-    }
+                    None
+                },
+            );
 
-    #[test]
-    #[serial]
-    fn guard_hook_three_times() {
-        reset_test_value();
+            assert_eq!(result.is_ok(), true);
 
-        let _vm = get_vm();
-        let mut current = *HW_BP_TEST_VALUE.lock().unwrap();
+            let result = HardwareBreakpointHook::add_hook(
+                GetCurrentProcess as *const () as usize,
+                |_exception_info| {
+                    *HW_BP_TEST_VALUE.lock().unwrap() += 1;
 
-        add_get_proc_address_hook();
+                    None
+                },
+            );
 
-        for _ in 0..3 {
-            assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), current);
+            assert_eq!(result.is_ok(), true);
 
             unsafe {
                 GetProcAddress(0 as _, null());
+                GetCurrentProcess();
             }
-            assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), current + 1);
 
-            current += 1;
+            assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), current + 2);
         }
+    }
+
+    impl BaseTest for HWBPHookTests {
+        fn reset_test_value() {
+            *HW_BP_TEST_VALUE.lock().unwrap() = 0;
+        }
+
+        fn get_test_value() -> i32 {
+            *HW_BP_TEST_VALUE.lock().unwrap()
+        }
+
+        fn set_test_value(value: i32) {
+            *HW_BP_TEST_VALUE.lock().unwrap() = value;
+        }
+
+        fn add_get_proc_address_hook() {
+            let result = HardwareBreakpointHook::add_hook(
+                GetProcAddress as *const () as usize,
+                |_exception_info| {
+                    *HW_BP_TEST_VALUE.lock().unwrap() += 1;
+
+                    None
+                },
+            );
+
+            assert_eq!(result.is_ok(), true);
+        }
+
+        fn remove_get_proc_address_hook() {
+            let result = HardwareBreakpointHook::remove_hook(GetProcAddress as *const () as usize);
+            assert_eq!(result.is_ok(), true);
+        }
+    }
+    #[test]
+    #[serial]
+    fn hook_three_times() {
+        HWBPHookTests::hook_three_times()
     }
 
     #[test]
     #[serial]
     fn add_remove_add() {
-        reset_test_value();
-
-        let _vm = get_vm();
-        let current = *HW_BP_TEST_VALUE.lock().unwrap();
-
-        add_get_proc_address_hook();
-
-        unsafe {
-            GetProcAddress(0 as _, null());
-        }
-        assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), current + 1);
-
-        remove_get_proc_address_hook();
-
-        unsafe {
-            GetProcAddress(0 as _, null());
-        }
-        assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), current + 1);
-
-        add_get_proc_address_hook();
-
-        unsafe {
-            GetProcAddress(0 as _, null());
-        }
-
-        assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), current + 2);
+        HWBPHookTests::add_remove_add()
     }
 
     #[test]
     #[serial]
     fn add_drop() {
-        reset_test_value();
-
-        let vm = get_vm();
-        let current = *HW_BP_TEST_VALUE.lock().unwrap();
-
-        add_get_proc_address_hook();
-
-        unsafe {
-            GetProcAddress(0 as _, null());
-        }
-
-        assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), current + 1);
-
-        drop(vm);
-
-        unsafe {
-            GetProcAddress(0 as _, null());
-        }
-        assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), current + 1);
+        HWBPHookTests::add_drop()
     }
 
     #[test]
     #[serial]
     fn add_multiple_hooks() {
-        reset_test_value();
-
-        let _vm = get_vm();
-        let current = *HW_BP_TEST_VALUE.lock().unwrap();
-
-        let result = HardwareBreakpointHook::add_hook(
-            GetProcAddress as *const () as usize,
-            |_exception_info| {
-                *HW_BP_TEST_VALUE.lock().unwrap() += 1;
-            },
-            HWBreakpointSlot::Slot1,
-        );
-
-        assert_eq!(result.is_ok(), true);
-
-        let result = HardwareBreakpointHook::add_hook(
-            GetCurrentProcess as *const () as usize,
-            |_exception_info| {
-                *HW_BP_TEST_VALUE.lock().unwrap() += 1;
-            },
-            HWBreakpointSlot::Slot2,
-        );
-
-        assert_eq!(result.is_ok(), true);
-
-        unsafe {
-            GetProcAddress(0 as _, null());
-            GetCurrentProcess();
-        }
-
-        assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), current + 2);
+        HWBPHookTests::add_multiple_hooks()
     }
 }
