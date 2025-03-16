@@ -12,6 +12,8 @@ fn hw_bp() {
         std::thread::sleep as *const () as usize,
         |_exception_info| {
             println!("Hooked!");
+
+            None
         },
         HWBreakpointSlot::Slot3,
     );
@@ -32,6 +34,8 @@ fn sw_bp() {
         std::thread::sleep as *const () as usize,
         |_exception_info| {
             println!("Hooked!");
+
+            None
         },
     );
 
@@ -51,6 +55,8 @@ fn guard_bp() {
         std::thread::sleep as *const () as usize,
         |_exception_info| {
             println!("Hooked!");
+
+            None
         },
     );
 

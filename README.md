@@ -1,4 +1,5 @@
 # veh-hooking-rs
+
 [![Crates.io Version](https://img.shields.io/crates/v/veh-hooking-rs)](https://crates.io/crates/veh-hooking-rs/)
 ![CI workflow](https://github.com/0xC9C3/veh-hooking-rs/actions/workflows/ci.yml/badge.svg?branch=main)
 
@@ -35,6 +36,7 @@ fn main() {
         std::thread::sleep as *const () as usize,
         |_exception_info| {
             println!("Hooked!");
+            None
         },
         HWBreakpointSlot::Slot3,
     );
@@ -62,6 +64,7 @@ fn main() {
         std::thread::sleep as *const () as usize,
         |_exception_info| {
             println!("Hooked!");
+            None
         },
         HWBreakpointSlot::Slot1,
     );
@@ -75,3 +78,7 @@ fn main() {
     }
 }
 ```
+
+## Versioning
+
+This project is still in the early stages of development, so the API may change frequently. 

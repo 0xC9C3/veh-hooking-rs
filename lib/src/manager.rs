@@ -7,7 +7,7 @@ use windows::Win32::System::Diagnostics::Debug::{
     EXCEPTION_CONTINUE_SEARCH, EXCEPTION_POINTERS,
 };
 
-pub type HookHandler = fn(*mut EXCEPTION_POINTERS);
+pub type HookHandler = fn(*mut EXCEPTION_POINTERS) -> Option<i32>;
 
 pub struct VEHManager {
     veh_handle: *mut core::ffi::c_void,
@@ -93,7 +93,7 @@ pub fn veh_continue_search() -> i32 {
 
 pub fn veh_continue_step(p: *mut EXCEPTION_POINTERS) -> i32 {
     unsafe {
-        (*(*p).ContextRecord).EFlags |= 0x100;
+        (*(*p).ContextRecord).EFlags |= 1 << 8;
     }
 
     EXCEPTION_CONTINUE_EXECUTION

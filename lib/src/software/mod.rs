@@ -51,7 +51,7 @@ impl SoftwareBreakpointHook {
             .map_err(|e| e)
     }
 
-    pub fn handle(&self, p: *mut EXCEPTION_POINTERS) {
+    pub fn handle(&self, p: *mut EXCEPTION_POINTERS) -> Option<i32> {
         (self.handler)(p)
     }
 
@@ -120,6 +120,8 @@ mod software_breakpoint_tests {
             GetProcAddress as *const () as usize,
             |_exception_info| {
                 *SW_BP_TEST_VALUE.lock().unwrap() += 1;
+
+                None
             },
         );
 

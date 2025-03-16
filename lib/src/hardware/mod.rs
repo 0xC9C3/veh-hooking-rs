@@ -193,7 +193,7 @@ impl HardwareBreakpointHook {
         Ok(())
     }
 
-    pub fn handle(&self, p: *mut EXCEPTION_POINTERS) {
+    pub fn handle(&self, p: *mut EXCEPTION_POINTERS) -> Option<i32> {
         (self.handler)(p)
     }
 }
@@ -228,6 +228,8 @@ mod hardware_breakpoint_tests {
             GetProcAddress as *const () as usize,
             |_exception_info| {
                 *HW_BP_TEST_VALUE.lock().unwrap() += 1;
+
+                None
             },
             HWBreakpointSlot::Slot1,
         );
@@ -329,6 +331,8 @@ mod hardware_breakpoint_tests {
             GetProcAddress as *const () as usize,
             |_exception_info| {
                 *HW_BP_TEST_VALUE.lock().unwrap() += 1;
+
+                None
             },
             HWBreakpointSlot::Slot1,
         );
@@ -339,6 +343,8 @@ mod hardware_breakpoint_tests {
             GetCurrentProcess as *const () as usize,
             |_exception_info| {
                 *HW_BP_TEST_VALUE.lock().unwrap() += 1;
+
+                None
             },
             HWBreakpointSlot::Slot2,
         );

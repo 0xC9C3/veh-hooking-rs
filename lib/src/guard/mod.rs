@@ -42,7 +42,7 @@ impl GuardHook {
             .map_err(|e| e)
     }
 
-    pub fn handle(&self, p: *mut EXCEPTION_POINTERS) {
+    pub fn handle(&self, p: *mut EXCEPTION_POINTERS) -> Option<i32> {
         (self.handler)(p)
     }
 
@@ -106,6 +106,8 @@ mod guard_tests {
     fn add_get_proc_address_hook() {
         let result = GuardHook::add_hook(GetProcAddress as *const () as usize, |_exception_info| {
             *TEST_VALUE.lock().unwrap() += 1;
+
+            None
         });
 
         assert_eq!(result.is_ok(), true);
