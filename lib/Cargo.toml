@@ -1,6 +1,6 @@
 [package]
 name = "veh-hooking-rs"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 authors = [
     "0xC9C3 <0xc9c3@0xc3.sh>"
@@ -9,13 +9,25 @@ description = "A Rust library for creating VEH hooks."
 repository = "https://github.com/0xC9C3/veh-hooking-rs"
 license = "WTFPL"
 
+[features]
+default = ["log"]
+log = ["dep:log"]
+
 [dependencies]
 papaya = "0.2.1"
 iced-x86 = "1.21.0"
+log = { version = "0.4", optional = true }
+indexmap = "2.8.0"
 
 [dependencies.windows]
 version = "0.60.0"
 features = ["Win32", "Win32_System", "Win32_System_Memory", "Win32_System_Diagnostics", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", "Win32_System_LibraryLoader", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"]
 
+[dependencies.windows-result]
+version = "0.3.1"
+
 [dev-dependencies]
 serial_test = "3.2.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }

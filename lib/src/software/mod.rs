@@ -70,17 +70,20 @@ impl SoftwareBreakpointHook {
 
         Ok(())
     }
-
-    pub fn remove_all_hooks() -> Result<(), HookError> {
-        for (k, _v) in SW_BP_HOOK_HASHMAP.pin().iter() {
-            Self::remove_hook(*k)?;
-        }
-
-        Ok(())
-    }
 }
 
 impl HookBase for SoftwareBreakpointHook {
+    fn enable(&self) -> Result<(), HookError> {
+        self.set_byte(Self::X86_BREAKPOINT)
+    }
+    fn disable(&self) -> Result<(), HookError> {
+        self.set_byte(self.original_byte)
+    }
+
+    fn handle(&self, p: *mut EXCEPTION_POINTERS) -> Option<i32> {
+        (self.handler)(p)
+    }
+
     fn add_hook(target_address: usize, handler: HookHandler) -> Result<(), HookError> {
         let sw_bp_hook = SoftwareBreakpointHook::create(target_address, handler)?;
         let sw_bp_hook_next_address = sw_bp_hook.get_next_instruction_offset()?;
@@ -94,17 +97,6 @@ impl HookBase for SoftwareBreakpointHook {
 
         Ok(())
     }
-    fn enable(&self) -> Result<(), HookError> {
-        self.set_byte(Self::X86_BREAKPOINT)
-    }
-
-    fn disable(&self) -> Result<(), HookError> {
-        self.set_byte(self.original_byte)
-    }
-
-    fn handle(&self, p: *mut EXCEPTION_POINTERS) -> Option<i32> {
-        (self.handler)(p)
-    }
 
     fn remove_hook(target_address: usize) -> Result<(), HookError> {
         let pin = SW_BP_HOOK_HASHMAP.pin();
@@ -115,14 +107,6 @@ impl HookBase for SoftwareBreakpointHook {
         hook.disable()?;
         pin.remove(&hook.get_next_instruction_offset()?);
         pin.remove(&target_address);
-
-        Ok(())
-    }
-
-    fn remove_all_hooks() -> Result<(), HookError> {
-        for (k, _v) in SW_BP_HOOK_HASHMAP.pin().iter() {
-            Self::remove_hook(*k)?;
-        }
 
         Ok(())
     }
@@ -153,7 +137,13 @@ impl HookBase for SoftwareBreakpointHook {
             STATUS_SINGLE_STEP => {
                 let rip = unsafe { (*(*exception_info).ContextRecord).Rip as usize };
                 if let Some(hook) = SW_BP_HOOK_HASHMAP.pin().get(&rip) {
-                    hook.enable().expect("Failed to reapply hook");
+                    let result = hook.enable();
+
+                    if let Err(e) = result {
+                        #[cfg(feature = "log")]
+                        log::error!("Failed to enable hook: {:#?}", e);
+                    }
+
                     return Some(veh_continue());
                 }
 
@@ -162,27 +152,56 @@ impl HookBase for SoftwareBreakpointHook {
             _ => None,
         }
     }
+
+    fn iter() -> Vec<usize> {
+        SW_BP_HOOK_HASHMAP.pin().keys().copied().collect()
+    }
 }
 
 impl Drop for SoftwareBreakpointHook {
     fn drop(&mut self) {
-        self.disable().expect("Failed to remove hook");
+        let result = self.disable();
+
+        if let Err(e) = result {
+            #[cfg(feature = "log")]
+            log::error!("Failed to disable hook: {:#?}", e);
+        }
     }
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod software_breakpoint_tests {
     use crate::base_tests::BaseTest;
     use crate::hook_base::HookBase;
     use crate::software::SoftwareBreakpointHook;
     use serial_test::serial;
-    use windows::core::imp::GetProcAddress;
 
     static SW_BP_TEST_VALUE: std::sync::Mutex<i32> = std::sync::Mutex::new(0);
 
     struct SWBPHookTests;
+
+    impl SWBPHookTests {
+        fn drop_hook() {
+            let _vm = SWBPHookTests::get_vm();
+            SWBPHookTests::reset_test_value();
+            let hook =
+                SoftwareBreakpointHook::create(Self::get_test_fn_address(), |_exception_info| {
+                    *SW_BP_TEST_VALUE.lock().unwrap() += 1;
+
+                    None
+                })
+                .unwrap();
+
+            hook.enable().unwrap();
+
+            drop(hook);
+        }
+    }
+
     impl BaseTest for SWBPHookTests {
         fn reset_test_value() {
+            SoftwareBreakpointHook::remove_all_hooks().unwrap();
             *SW_BP_TEST_VALUE.lock().unwrap() = 0;
         }
 
@@ -194,22 +213,19 @@ mod software_breakpoint_tests {
             *SW_BP_TEST_VALUE.lock().unwrap() = value;
         }
 
-        fn add_get_proc_address_hook() {
-            let result = SoftwareBreakpointHook::add_hook(
-                GetProcAddress as *const () as usize,
-                |_exception_info| {
+        fn add_hook() {
+            let result =
+                SoftwareBreakpointHook::add_hook(Self::get_test_fn_address(), |_exception_info| {
                     *SW_BP_TEST_VALUE.lock().unwrap() += 1;
 
                     None
-                },
-            );
+                });
 
             assert_eq!(result.is_ok(), true);
         }
 
-        fn remove_get_proc_address_hook() {
-            let result = SoftwareBreakpointHook::remove_hook(GetProcAddress as *const () as usize);
-            assert_eq!(result.is_ok(), true);
+        fn remove_hook() {
+            let _result = SoftwareBreakpointHook::remove_hook(Self::get_test_fn_address());
         }
     }
 
@@ -229,5 +245,11 @@ mod software_breakpoint_tests {
     #[serial]
     fn add_drop() {
         SWBPHookTests::add_drop()
+    }
+
+    #[test]
+    #[serial]
+    fn drop_hook() {
+        SWBPHookTests::drop_hook()
     }
 }

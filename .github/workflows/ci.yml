@@ -11,3 +11,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo test --all-features
+  coverage:
+    name: cargo llvm-cov
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo +stable install cargo-llvm-cov --locked
+      - run: cargo llvm-cov --ignore-filename-regex example

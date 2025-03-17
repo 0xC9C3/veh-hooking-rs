@@ -9,11 +9,19 @@ pub enum HookError {
     IoError(std::io::Error),
     HookError(String),
     HookNotFound,
+    PoisonError,
+    UnknownHardwareBreakpointSlot,
 }
 
 impl From<std::io::Error> for HookError {
     fn from(e: std::io::Error) -> Self {
         HookError::IoError(e)
+    }
+}
+
+impl From<windows_result::Error> for HookError {
+    fn from(e: windows_result::Error) -> Self {
+        HookError::HookError(e.to_string())
     }
 }
 
@@ -28,9 +36,15 @@ pub trait HookBase {
 
     fn remove_hook(target_address: usize) -> Result<(), HookError>;
 
-    fn remove_all_hooks() -> Result<(), HookError>;
+    fn remove_all_hooks() -> Result<(), HookError> {
+        Self::iter()
+            .iter()
+            .try_for_each(|&addr| Self::remove_hook(addr))
+    }
 
     fn handle_event(rip: usize, status: NTSTATUS, p: *mut EXCEPTION_POINTERS) -> Option<i32>;
+
+    fn iter() -> Vec<usize>;
 }
 
 pub fn veh_continue() -> i32 {

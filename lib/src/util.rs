@@ -1,3 +1,4 @@
+use crate::hook_base::HookError;
 use iced_x86::{Decoder, DecoderOptions};
 use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -15,18 +16,14 @@ pub fn virtual_protect(
 ) -> Result<PAGE_PROTECTION_FLAGS, std::io::Error> {
     let mut old_protection = PAGE_PROTECTION_FLAGS::default();
 
-    let result = unsafe {
+    unsafe {
         VirtualProtect(
             target as *mut _,
             size_of::<u8>(),
             protection,
             &mut old_protection,
         )
-    };
-
-    if result.is_err() {
-        return Err(std::io::Error::last_os_error());
-    }
+    }?;
 
     Ok(old_protection)
 }
@@ -81,47 +78,31 @@ pub fn os_bitness() -> u32 {
 
 static NO_MORE_FILES: u32 = 0x80070012;
 pub fn iterate_threads(
-    callback: Box<dyn Fn(windows::Win32::Foundation::HANDLE) -> Result<(), std::io::Error>>,
-) -> Result<(), std::io::Error> {
+    callback: Box<dyn Fn(windows::Win32::Foundation::HANDLE) -> Result<(), HookError>>,
+) -> Result<(), HookError> {
     let pid = unsafe { GetCurrentProcessId() };
-    let h = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
-    if h.is_err() {
-        return Err(std::io::Error::last_os_error());
-    }
-    let h = h.unwrap();
+    let h = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }?;
 
     let mut te = THREADENTRY32::default();
     te.dwSize = size_of::<THREADENTRY32>() as u32;
-    let thread32_first = unsafe { Thread32First(h, &mut te) };
-    if thread32_first.is_err() {
-        return Err(std::io::Error::last_os_error());
-    }
+    unsafe { Thread32First(h, &mut te) }?;
 
     loop {
         if te.th32OwnerProcessID == pid {
-            let thd = unsafe { OpenThread(THREAD_ALL_ACCESS, false, te.th32ThreadID) };
-            if thd.is_err() {
-                return Err(std::io::Error::last_os_error());
-            }
-
-            let thd = thd.unwrap();
+            let thd = unsafe { OpenThread(THREAD_ALL_ACCESS, false, te.th32ThreadID) }?;
 
             callback(thd)?;
 
-            let result = unsafe { CloseHandle(thd) };
-
-            if result.is_err() {
-                return Err(std::io::Error::last_os_error());
-            }
+            unsafe { CloseHandle(thd) }?;
         }
 
         te.dwSize = size_of::<THREADENTRY32>() as u32;
         let thread32_next = unsafe { Thread32Next(h, &mut te) };
-        if thread32_next.is_err() {
-            if thread32_next.err().unwrap().code().0 as u32 == NO_MORE_FILES {
+        if let Err(e) = thread32_next {
+            if e.code().0 as u32 == NO_MORE_FILES {
                 return Ok(());
             }
-            return Err(std::io::Error::last_os_error());
+            return Err(HookError::from(e));
         }
     }
 }

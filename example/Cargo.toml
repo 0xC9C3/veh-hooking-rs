@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 veh-hooking-rs = { path = "../lib" }
+env_logger = "0.11.7"
+log = "0.4"
