@@ -37,17 +37,12 @@ fn main() {
         |_exception_info| {
             println!("Hooked!");
             None
-        },
-        HWBreakpointSlot::Slot3,
+        }
     );
 
     println!("Create result! {:#?}", result);
 
-    println!("Begin loop");
-    loop {
-        println!("Outer tick");
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
+    std::thread::sleep(std::time::Duration::from_secs(1));
 }
 ```
 
@@ -56,12 +51,15 @@ Example using the Low level API:
 Hook the `std::thread::sleep` function using a hardware breakpoint:
 
 ```rust
-use veh_hooking_rs::hardware_breakpoint::HardwareBreakpointHook;
+use veh_hooking_rs::manager::VEHManager;
+use veh_hooking_rs::hardware::{HWBreakpointSlot, HardwareBreakpointHook};
 use veh_hooking_rs::hook_base::HookBase;
 
 fn main() {
-    // ... create a vectored exception handler beforehand
-    let result = HardwareBreakpointHook::add_hook(
+    // ... create a vectored exception handler beforehand; using the VEHManager is for this example
+    let _vm = VEHManager::new().expect("Failed to initialize VMM");
+
+    let result = HardwareBreakpointHook::add_hook_at_slot(
         std::thread::sleep as *const () as usize,
         |_exception_info| {
             println!("Hooked!");
@@ -72,11 +70,7 @@ fn main() {
 
     println!("Create result! {:#?}", result);
 
-    println!("Begin loop");
-    loop {
-        println!("Outer tick");
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
+    std::thread::sleep(std::time::Duration::from_secs(1));
 }
 ```
 
@@ -113,11 +107,7 @@ fn main() {
 
     println!("Create result! {:#?}", result);
 
-    println!("Begin loop");
-    loop {
-        println!("Outer tick");
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
+    std::thread::sleep(std::time::Duration::from_secs(1));
 }
 ```
 
