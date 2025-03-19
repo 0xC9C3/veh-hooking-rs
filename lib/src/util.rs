@@ -1,6 +1,5 @@
 use crate::hook_base::HookError;
 use iced_x86::{Decoder, DecoderOptions};
-use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
 };
@@ -8,7 +7,7 @@ use windows::Win32::System::Memory::{
     VirtualProtect, VirtualQuery, MEMORY_BASIC_INFORMATION, PAGE_PROTECTION_FLAGS,
 };
 use windows::Win32::System::SystemInformation::{GetNativeSystemInfo, SYSTEM_INFO};
-use windows::Win32::System::Threading::{GetCurrentProcessId, OpenThread, THREAD_ALL_ACCESS};
+use windows::Win32::System::Threading::GetCurrentProcessId;
 
 pub fn virtual_protect(
     target: usize,
@@ -78,7 +77,7 @@ pub fn os_bitness() -> u32 {
 
 static NO_MORE_FILES: u32 = 0x80070012;
 pub fn iterate_threads(
-    callback: Box<dyn Fn(windows::Win32::Foundation::HANDLE) -> Result<(), HookError>>,
+    callback: Box<dyn Fn(u32) -> Result<(), HookError>>,
 ) -> Result<(), HookError> {
     let pid = unsafe { GetCurrentProcessId() };
     let h = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }?;
@@ -89,11 +88,11 @@ pub fn iterate_threads(
 
     loop {
         if te.th32OwnerProcessID == pid {
-            let thd = unsafe { OpenThread(THREAD_ALL_ACCESS, false, te.th32ThreadID) }?;
+            //let thd = unsafe { OpenThread(THREAD_ALL_ACCESS, false, te.th32ThreadID) }?;
 
-            callback(thd)?;
+            callback(te.th32ThreadID)?;
 
-            unsafe { CloseHandle(thd) }?;
+            //unsafe { CloseHandle(thd) }?;
         }
 
         te.dwSize = size_of::<THREADENTRY32>() as u32;
