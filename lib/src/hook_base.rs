@@ -12,6 +12,7 @@ pub enum HookError {
     NoEmptySlot,
     PoisonError,
     UnknownHardwareBreakpointSlot,
+    ProcessNotFound,
 }
 
 impl From<std::io::Error> for HookError {
