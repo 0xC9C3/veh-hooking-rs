@@ -55,6 +55,23 @@ impl VEHManager {
         HardwareBreakpointHook::remove_hook(target_address)
     }
 
+    pub fn add_hardware_breakpoint_hook_with_thread_id(
+        &self,
+        thread_id: u32,
+        target_address: usize,
+        handler: HookHandler,
+    ) -> Result<(), HookError> {
+        HardwareBreakpointHook::add_hook_with_thread_id(thread_id, target_address, handler)
+    }
+
+    pub fn remove_hardware_breakpoint_hook_with_thread_id(
+        &self,
+        thread_id: u32,
+        target_address: usize,
+    ) -> Result<(), HookError> {
+        HardwareBreakpointHook::remove_hook_for_thread(target_address, thread_id)
+    }
+
     pub fn add_software_breakpoint_hook(
         &self,
         target_address: usize,

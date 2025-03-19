@@ -9,6 +9,7 @@ pub enum HookError {
     IoError(std::io::Error),
     HookError(String),
     HookNotFound,
+    NoEmptySlot,
     PoisonError,
     UnknownHardwareBreakpointSlot,
 }

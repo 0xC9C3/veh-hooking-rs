@@ -8,7 +8,7 @@ A library for creating hooks using VEH (Vectored Exception Handling) on Windows.
 There are currently three types of hooks implemented:
 
 - Hardware breakpoints
-    - Hooks using hardware breakpoints are the fastest, but there are only 4 hardware breakpoints available.
+    - Hooks using hardware breakpoints are the fastest, but there are only 4 hardware breakpoints available per thread.
 - Software breakpoints
     - Hooks using software breakpoints are slower than hardware breakpoints, but there are no limits on the number of
       hooks. Software breakpoints are implemented using the `INT3` instruction and will write to the memory.
