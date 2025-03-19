@@ -1,5 +1,7 @@
 use crate::hook_base::HookError;
 use iced_x86::{Decoder, DecoderOptions};
+use windows::Wdk::System::Threading::{NtQueryInformationThread, ThreadQuerySetWin32StartAddress};
+use windows::Win32::Foundation::CloseHandle;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
 };
@@ -7,7 +9,7 @@ use windows::Win32::System::Memory::{
     VirtualProtect, VirtualQuery, MEMORY_BASIC_INFORMATION, PAGE_PROTECTION_FLAGS,
 };
 use windows::Win32::System::SystemInformation::{GetNativeSystemInfo, SYSTEM_INFO};
-use windows::Win32::System::Threading::GetCurrentProcessId;
+use windows::Win32::System::Threading::{GetCurrentProcessId, OpenThread, THREAD_ALL_ACCESS};
 
 pub fn virtual_protect(
     target: usize,
@@ -76,9 +78,10 @@ pub fn os_bitness() -> u32 {
 }
 
 static NO_MORE_FILES: u32 = 0x80070012;
-pub fn iterate_threads(
-    callback: Box<dyn Fn(u32) -> Result<(), HookError>>,
-) -> Result<(), HookError> {
+pub fn iterate_threads<F>(mut callback: F) -> Result<(), HookError>
+where
+    F: FnMut(u32) -> Result<(), HookError>,
+{
     let pid = unsafe { GetCurrentProcessId() };
     let h = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }?;
 
@@ -88,11 +91,7 @@ pub fn iterate_threads(
 
     loop {
         if te.th32OwnerProcessID == pid {
-            //let thd = unsafe { OpenThread(THREAD_ALL_ACCESS, false, te.th32ThreadID) }?;
-
             callback(te.th32ThreadID)?;
-
-            //unsafe { CloseHandle(thd) }?;
         }
 
         te.dwSize = size_of::<THREADENTRY32>() as u32;
@@ -104,4 +103,39 @@ pub fn iterate_threads(
             return Err(HookError::from(e));
         }
     }
+}
+
+pub fn find_threads_by_entry_point(entry_point: usize) -> Result<Vec<u32>, HookError> {
+    let mut threads = Vec::new();
+
+    let get_fn = |tid| {
+        let thread_handle = unsafe { OpenThread(THREAD_ALL_ACCESS, false, tid) }?;
+
+        let start_address: usize = 0;
+        let result = unsafe {
+            NtQueryInformationThread(
+                thread_handle,
+                ThreadQuerySetWin32StartAddress,
+                &start_address as *const _ as *mut _,
+                size_of::<usize>() as u32,
+                std::ptr::null_mut(),
+            )
+        };
+
+        unsafe { CloseHandle(thread_handle) }?;
+
+        if result.is_err() {
+            return Err(HookError::from(std::io::Error::last_os_error()));
+        }
+
+        if start_address == entry_point {
+            threads.push(tid);
+        }
+
+        Ok(())
+    };
+
+    iterate_threads(Box::new(get_fn))?;
+
+    Ok(threads)
 }

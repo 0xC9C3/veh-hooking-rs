@@ -4,11 +4,14 @@ mod hardware_breakpoint_tests {
     use crate::base_tests::BaseTest;
     use crate::hardware::{HWBreakpointSlot, HardwareBreakpointHook};
     use crate::hook_base::HookBase;
+    use crate::util;
     use serial_test::serial;
     use std::ptr::null;
     use windows::core::imp::GetProcAddress;
     use windows::Win32::System::SystemInformation::{GetLocalTime, GetOsManufacturingMode};
-    use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThreadId};
+    use windows::Win32::System::Threading::{
+        CreateThread, GetCurrentProcess, GetCurrentThreadId, ResumeThread, THREAD_CREATION_FLAGS,
+    };
     use windows_result::BOOL;
 
     static HW_BP_TEST_VALUE: std::sync::Mutex<i32> = std::sync::Mutex::new(0);
@@ -164,6 +167,52 @@ mod hardware_breakpoint_tests {
 
             assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), 10);
         }
+
+        fn test_thread_entrypoint() {
+            HWBPHookTests::reset_test_value();
+
+            let _vm = HWBPHookTests::get_vm();
+
+            unsafe extern "system" fn int_test(_lpthreadparameter: *mut core::ffi::c_void) -> u32 {
+                std::thread::sleep(std::time::Duration::from_secs(15));
+                0
+            }
+
+            let thread_handle = unsafe {
+                CreateThread(
+                    None,
+                    0,
+                    Some(int_test),
+                    None,
+                    THREAD_CREATION_FLAGS(0x4),
+                    None,
+                )
+            }
+            .unwrap();
+
+            let threads = util::find_threads_by_entry_point(int_test as *const () as usize)
+                .expect("NOT FOUND");
+
+            assert_eq!(threads.len(), 1);
+
+            HardwareBreakpointHook::add_hook_with_thread_id(
+                threads[0],
+                int_test as *const () as usize,
+                |_exception_info| {
+                    *HW_BP_TEST_VALUE.lock().unwrap() += 1;
+
+                    None
+                },
+            )
+            .expect("Failed to add hook");
+
+            // resume the thread
+            unsafe { ResumeThread(thread_handle) };
+
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            assert_eq!(*HW_BP_TEST_VALUE.lock().unwrap(), 1);
+        }
     }
 
     impl BaseTest for HWBPHookTests {
@@ -236,5 +285,11 @@ mod hardware_breakpoint_tests {
     #[serial]
     fn add_multi_thread_hooks_at_same_slot() {
         HWBPHookTests::add_multi_thread_hooks_at_same_slot();
+    }
+
+    #[test]
+    #[serial]
+    fn test_thread_entrypoint() {
+        HWBPHookTests::test_thread_entrypoint();
     }
 }

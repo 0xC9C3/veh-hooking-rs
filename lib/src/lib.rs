@@ -8,7 +8,7 @@ mod handler;
 pub mod hook_base;
 pub mod manager;
 pub mod software;
-mod util;
+pub mod util;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
